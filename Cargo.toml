@@ -1,0 +1,13 @@
+[package]
+name = "fileshare"
+version = "0.1.0"
+authors = ["alevann <55453451+alevann@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[dependencies.pancurses]
+version = "0.16"
+features = ["win32"]
