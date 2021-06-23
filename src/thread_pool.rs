@@ -6,7 +6,7 @@ use std::sync::{
 use std::thread::{self,JoinHandle};
 
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+type Job = Box<dyn FnOnce(usize) + Send + 'static>;
 
 enum Message {
     NewJob(Job),
@@ -35,7 +35,7 @@ impl ThreadPool {
         ThreadPool { workers, sender }
     }
 
-    pub fn execute<F>(&self, f: F) where F: FnOnce() + Send + 'static {
+    pub fn execute<F>(&self, f: F) where F: FnOnce(usize) + Send + 'static {
         let job = Box::new(f);
         self.sender.send(Message::NewJob(job)).unwrap();
     }
@@ -70,10 +70,9 @@ impl Worker {
             let msg = receiver
                 .lock().expect("Attempted to lock Receiver<Job> but lock was poisoned")
                 .recv().expect("Pool shutdown before its workers");
-            info!("Worker {} got a job!", id);
-
+            
             if let Message::NewJob(job) = msg {
-                job()
+                job(id)
             } else {
                 break
             }

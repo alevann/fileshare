@@ -1,10 +1,10 @@
 #[macro_use]
 extern crate log;
 extern crate pancurses;
+extern crate rand;
 
 mod server;
 mod client;
-mod tserv;
 mod cli;
 mod thread_pool;
 
@@ -15,12 +15,21 @@ use std::sync::mpsc;
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     debug!("{:?}", config);
 
-    let (sender, receiver) = mpsc::channel();
+    if config.as_server {
+        server()
+    } else {
+        client()
+    }
+}
+
+fn server() -> Result<(), Box<dyn Error>> {
+    let (sender_0, receiver_0) = mpsc::channel();
+    let (sender_1, receiver_1) = mpsc::channel();
     let ui_thread = std::thread::spawn(move || {
-        cli::run(sender)
+        cli::run(sender_0, receiver_1)
     });
     let sr_thread = std::thread::spawn(move || {
-        server::run(receiver)
+        server::run(receiver_0, sender_1)
     });
 
     if let Err(_) = ui_thread.join() {
@@ -31,6 +40,10 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     } else {
         Ok(())
     }
+}
+
+fn client() -> Result<(), Box<dyn Error>> {
+    client::run(Config { as_server: false, file_list: vec![String::new(), String::new(), String::new(), String::new()], connect_to: "127.0.0.1:8080".to_owned() })
 }
 
 
@@ -61,9 +74,8 @@ impl Config {
 
 
 pub struct ThreadState {
-    thread: u64,
-    percent: f32,
-    file: String,
+    thread: usize,
+    complete: u8
 }
 
 pub enum Message {
