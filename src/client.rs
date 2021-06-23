@@ -12,7 +12,7 @@ pub struct Client {
 }
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let files = config.file_list.expect("Invalid file list!");
+    let files = config.file_list;
 
     for file in files.clone() {
         if !Path::new(&file).exists() {

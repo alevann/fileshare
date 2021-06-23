@@ -1,59 +1,32 @@
-use std::error::Error;
-use std::net::{TcpListener,TcpStream};
-use std::io::{Read,Write};
-use std::fs::File;
+use std::sync::{
+    mpsc::{Sender, Receiver},
+    Arc,
+    Mutex
+};
+use std::net::{TcpListener, TcpStream, SocketAddr};
+use super::{ThreadState, Message};
+use crate::thread_pool::ThreadPool;
 
-pub struct Server {
 
-}
-
-pub fn run() -> Result<(), Box<dyn Error>> {
-    let listener = TcpListener::bind("127.0.0.1:8080")?;
-
-    println!("Server listening!");
-
-    for stream in listener.incoming() {
-        handle_client(&mut stream?)?;
-    }
-
-    Ok(())
-}
-
-fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn Error>> {
-    let mut bytes = [0_u8; 8];
-    stream.read_exact(&mut bytes).expect("Failed to read filename size");
-    let size = usize::from_be_bytes(bytes);
-    println!("Received filename size: {}", size);
-
-    let mut bytes = vec![0_u8; size];
-    stream.read_exact(&mut bytes).expect("Failed to read filename");
-
-    let name = String::from_utf8(bytes).expect("Failed to parse filename");
-    println!("Received filename: {:?}", name);
-
+pub fn run(receiver: Receiver<Message>) {
+    let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
+    listener.set_nonblocking(true)
+        .expect("Failed to set non-blocking server socket");
     
-    let mut bytes = [0_u8; 8];
-    stream.read_exact(&mut bytes).expect("Failed to read file size");
-    let size = usize::from_be_bytes(bytes);
-    println!("Received file size: {}", size);
-    
-    let mut file = File::create(format!("./shared/{}", name))?;
-    let mut bytes = [0_u8; 1024];
-    let mut count = 0;
-    let mut read = stream.read(&mut bytes).unwrap_or_default();
-    while read == 1024 {
-        let written = file.write(&mut bytes).expect("Failed to write to file");
-        count += written;
-        print!("Received: {:.2}\r", count as f32 / size as f32 * 100_f32);
-        read = stream.read(&mut bytes).unwrap_or_default()
-    }
-    let written = file.write(&mut bytes[0..read]).expect("Failed to write to file");
-    count += written;
-    println!("Received: {:.2}", count as f32 / size as f32 * 100_f32);
+    let pool = ThreadPool::new(4);
+    info!("Server pool started");
 
-    if count != size {
-        Err(format!("Failed to write file completely: expected {} bytes but {} were written", size, count).into())
-    } else {
-        Ok(())
+    loop {
+        if let Ok(Message::Terminate) = receiver.try_recv() {
+            break info!("Server shutdown message received");
+        }
+        if let Ok(connection) = listener.accept() {
+            pool.execute(|| { handle_connection(connection) })
+        }
     }
 }
+
+fn handle_connection((stream, addr): (TcpStream, SocketAddr)) {
+    info!("Received a new connection: {}", addr);
+}
+

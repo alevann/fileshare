@@ -1,26 +1,43 @@
+#[macro_use]
+extern crate log;
 extern crate pancurses;
 
 mod server;
 mod client;
 mod tserv;
+mod cli;
+mod thread_pool;
 
 use std::error::Error;
-use pancurses::Input;
+use std::sync::mpsc;
+
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    println!("{:#?}", config);
+    debug!("{:?}", config);
 
-    if config.as_server {
-        tserv::run()
+    let (sender, receiver) = mpsc::channel();
+    let ui_thread = std::thread::spawn(move || {
+        cli::run(sender)
+    });
+    let sr_thread = std::thread::spawn(move || {
+        server::run(receiver)
+    });
+
+    if let Err(_) = ui_thread.join() {
+        return Err("Failed to shutdown UI thread".into())
+    }
+    if let Err(_) = sr_thread.join() {
+        Err("Failed to shutdown server thread".into())
     } else {
-        client::run(config)
+        Ok(())
     }
 }
+
 
 #[derive(Debug)]
 pub struct Config {
     as_server: bool,
-    file_list: Option<Vec<String>>,
+    file_list: Vec<String>,
     connect_to: String
 }
 
@@ -29,38 +46,26 @@ impl Config {
         if args.len() == 0 {
             Ok(Config {
                 as_server: true,
-                file_list: None,
+                file_list: Vec::new(),
                 connect_to: String::new()
             })
         } else {
             Ok(Config {
                 as_server: false,
-                file_list: Some(args[1..].to_vec()),
+                file_list: args[1..].to_vec(),
                 connect_to: args[0].clone()
             })
         }
     }
 }
 
-fn window() {
-    let wnd = pancurses::initscr();
-    wnd.printw("Type things, press delete to quit\n");
-    wnd.refresh();
-    wnd.keypad(true);
-    
-    pancurses::noecho();
 
-    loop {
-        match wnd.getch() {
-            Some(Input::Character(c)) => { wnd.addch(c); },
-            Some(Input::KeyDC) => break,
-            Some(input) => { wnd.addstr(&format!("{:?}", input)); },
-            None => ()
-        }
-    }
-
-    pancurses::endwin();
+pub struct ThreadState {
+    thread: u64,
+    percent: f32,
+    file: String,
 }
 
-
-
+pub enum Message {
+    Terminate
+}
