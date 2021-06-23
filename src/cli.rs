@@ -50,11 +50,11 @@ fn should_quit(ch: Option<Input>) -> bool {
     }
 }
 
-fn update_state(global_state: &mut HashMap<usize, u8>, state: ThreadState) {
+fn update_state(global_state: &mut HashMap<usize, f32>, state: ThreadState) {
     global_state.insert(state.thread, state.complete);
 }
 
-fn display_state(wnd: &Window, state: &HashMap<usize, u8>) {
+fn display_state(wnd: &Window, state: &HashMap<usize, f32>) {
     wnd.clear();
     wnd.addstr("Current server pool state:\n\n");
 
@@ -67,7 +67,7 @@ fn display_state(wnd: &Window, state: &HashMap<usize, u8>) {
             k,
             v,
             eq.repeat(*v as usize),
-            ne.repeat((100-v) as usize)
+            ne.repeat((100_f32-v) as usize)
         ));
     }
     

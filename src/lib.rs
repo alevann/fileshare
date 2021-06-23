@@ -18,7 +18,7 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     if config.as_server {
         server()
     } else {
-        client()
+        client(config)
     }
 }
 
@@ -42,8 +42,8 @@ fn server() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn client() -> Result<(), Box<dyn Error>> {
-    client::run(Config { as_server: false, file_list: vec![String::new(), String::new(), String::new(), String::new()], connect_to: "127.0.0.1:8080".to_owned() })
+fn client(config: Config) -> Result<(), Box<dyn Error>> {
+    client::run(config)
 }
 
 
@@ -75,7 +75,7 @@ impl Config {
 
 pub struct ThreadState {
     thread: usize,
-    complete: u8
+    complete: f32
 }
 
 pub enum Message {
