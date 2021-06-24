@@ -1,69 +1,83 @@
-use std::error::Error;
 use std::net::TcpStream;
-use std::io::Write;
-use std::mem;
-use std::fs::{File,self};
+use std::io::{Write,Read};
+use std::fs::{File};
 use std::path::Path;
-
+use std::time::Instant;
 use super::Config;
+use crate::thread_pool::ThreadPool;
 
-pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let files = config.file_list.clone();
-    println!("{:#?}", files);
-    println!("{:#?}", config.file_list);
-    println!("{:#?}", config);
 
-    for file in files.clone() {
+pub fn run(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = ThreadPool::new(2);
+
+    for file in config.file_list.clone() {
         if !Path::new(&file).exists() {
-            error!("File {} does not exists", file);
-            std::process::exit(1);
+            warn!("File {} does not exists, skipping", file);
+            continue
         }
+        
+        let endpoint = config.connect_to.clone();
+        pool.execute(move |_| {
+            send_file(endpoint, file.clone())
+        })
     }
 
-    let mut threads = vec![];
-
-    for file in files {
-        let connect_to = config.connect_to.clone();
-        let thread = std::thread::spawn(move || {
-            let fh = File::open(file.clone())
-                .expect("Failed to open file");
-
-            let mut stream = TcpStream::connect(connect_to)
-                .expect("Could not open stream");
-
-            let file_name: String = file.split("/").last()
-                .expect("Failed to get filename")
-                .to_string();
-
-            info!("Sharing file {}", file_name);
-
-            let bytes = file_name.as_bytes();
-            let size_as_bytes: [u8; 8] = unsafe { mem::transmute(bytes.len().to_be()) };
-
-            println!("Sending size: {}", bytes.len());
-            println!("Sending filename: {:?}", file_name);
-
-            stream.write(&size_as_bytes).expect("Failed to write size as bytes");
-            stream.write(bytes).expect("Failed to write filename bytes");
-
-            let file_size = fh.metadata().expect("Failed to read file metadata").len();
-            let size_as_bytes: [u8; 8] = unsafe { mem::transmute(file_size.to_be()) };
-            
-            println!("Sendfing file size: {}", file_size);
-
-            stream.write(&size_as_bytes).expect("Failed to send file size");
-
-            let content = fs::read(file.clone()).expect("Failed to read file");
-            stream.write(&content).expect("Failed  to send file content");
-
-            info!("File {} shared completely", file_name);
-        });
-        threads.push(thread);
-    }
-
-    for thread in threads {
-        thread.join().unwrap();
-    }
-    
     Ok(())
+}
+
+fn send_file(endpoint: String, path: String) {
+    let mut stream = match TcpStream::connect(endpoint.clone()) {
+        Ok(stream) => stream,
+        Err(e) => return error!("Could not connect to {}: {}", endpoint, e)
+    };
+    
+    let filename = path.split("/").last()
+        .expect("Failed to get filename")
+        .to_string();
+    let mut filehandle = match File::open(path) {
+        Ok(handle) => handle,
+        Err(e) => return error!("Failed to open file {}: {}", filename, e)
+    };
+    let filesize = filehandle.metadata()
+        .expect("Failed to read file metadata").len();
+
+    debug!("Sharing: {} ({}b)", filename, filesize);
+
+
+    let bytes = filename.as_bytes();
+    let bytes: [u8; 8] = unsafe { std::mem::transmute(bytes.len().to_be()) };    
+    stream.write(&bytes).expect("Failed to write filename size");
+    stream.write(filename.as_bytes()).expect("Failed to write filename");
+    
+    let bytes: [u8; 8] = unsafe { std::mem::transmute(filesize.to_be()) };
+    stream.write(&bytes).expect("Failed to write filesize");
+
+    let instant = Instant::now();
+    let elapsed = || { instant.elapsed().as_secs() };
+
+    let mut read_count = 0;
+    let mut written_count = 0;
+    let mut buffer = [0_u8; 1024];
+    let mut last_read = filehandle.read(&mut buffer).unwrap_or_default();
+    while last_read > 0 {
+        let write_res = stream.write(&buffer[0..last_read]);
+        if write_res.is_err() {
+            error!("Failed to write to stream ({}b out of {}b written)", written_count, filesize);
+        } else {
+            written_count += write_res.unwrap();
+        }
+        read_count += last_read;
+        last_read = filehandle.read(&mut buffer).unwrap_or_default();
+    }
+
+    info!("File shared in {}s", elapsed());
+    if written_count > read_count {
+        error!("Possible corruption: written {}b but {}b were read", written_count, read_count);
+    }
+    if read_count as u64 != filesize {
+        error!("Possible corruption: {}b were read when filesize is {}b", read_count, filesize);
+    }
+    if filesize != written_count as u64 {
+        error!("Possible corruption: written {}b but filesize is {}b", written_count, filesize);
+    }
 }

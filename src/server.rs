@@ -6,10 +6,15 @@ use super::{ThreadState, Message};
 use crate::thread_pool::ThreadPool;
 use std::io::{Read,Write};
 use std::fs::File;
+use std::time::Instant;
 
 
-pub fn run(receiver: Receiver<Message>, sender: Sender<ThreadState>) {
+pub fn run(
+    receiver: Receiver<Message>,
+    sender: Sender<ThreadState>
+) {
     let listener = TcpListener::bind("0.0.0.0:8080").unwrap();
+    listener.set_nonblocking(true).expect("Failed to set non-blocking socket");
     let pool = ThreadPool::new(2);
 
     info!("Server pool started and listener bound");
@@ -33,7 +38,11 @@ fn handle_connection(
     sender: Sender<ThreadState>
 ) {
     info!("Received a new connection: {}!", addr);
+    stream.set_nonblocking(false).expect("Failed to set non-blocking stream");
     let mut stream = StreamWrapper { stream };
+
+    let instant = Instant::now();
+    let elapsed = || { instant.elapsed().as_secs() };
 
     let name = stream.read_usize();
     let name = stream.read_string(name);
@@ -55,8 +64,9 @@ fn handle_connection(
 
     let mut buffer = [0_u8; 1024];
     let mut written_count = 0;
-    while stream.read(&mut buffer) > 0 {
-        match file.write(&mut buffer) {
+    let mut read_count = stream.read(&mut buffer);
+    while read_count > 0 && written_count < size {
+        match file.write(&mut buffer[0..read_count]) {
             Ok(count) => {
                 written_count += count;
                 if is_receiver_connected {
@@ -72,10 +82,20 @@ fn handle_connection(
                 return;
             }
         };
+        read_count = stream.read(&mut buffer);
+    }
+
+    info!("File shared in {}s", elapsed());
+    if written_count != size {
+        error!("File '{}' possibly corrupt: should have written {}b but wrote {}b instead", name, size, written_count);
     }
 }
 
-fn handle_file_write_error(err: std::io::Error, written_count: usize, name: &String) {
+fn handle_file_write_error(
+    err: std::io::Error,
+    written_count: usize,
+    name: &String
+) {
     error!("Failed to write to file after writing {}b (file: {})", written_count, name);
     error!("Fail to write to file was caused by: {}", err);
     if let Err(e) = std::fs::remove_file(format!("./shared/{}", name)) {

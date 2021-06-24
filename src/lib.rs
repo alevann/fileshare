@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate log;
 extern crate pancurses;
-extern crate rand;
 
 mod server;
 mod client;
